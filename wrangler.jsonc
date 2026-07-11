@@ -9,7 +9,8 @@
     "enabled": true
   },
   "vars": {
-    "ALLOWED_ORIGINS": "http://localhost:3000,https://jordandav-is.github.io"
+    "ALLOWED_ORIGINS": "http://localhost:3000,https://jordandav-is.github.io",
+    "SUPERADMIN_EMAIL": "jordan@jordandav.is"
   },
   "durable_objects": {
     "bindings": [

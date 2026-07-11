@@ -87,6 +87,7 @@ export class BeachHouseProperty extends DurableObject {
       .split(",")
       .map((origin) => origin.trim().replace(/\/$/, ""))
       .filter(Boolean);
+    this.superadminEmail = String(env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
     this.sql = ctx.storage.sql;
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -122,10 +123,51 @@ export class BeachHouseProperty extends DurableObject {
         CHECK (start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
         CHECK (end_date > start_date)
       );
+      CREATE TABLE IF NOT EXISTS listing (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT NOT NULL CHECK (length(name) BETWEEN 2 AND 80),
+        tagline TEXT NOT NULL CHECK (length(tagline) <= 160),
+        description TEXT NOT NULL CHECK (length(description) <= 2000),
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS photos (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL CHECK (length(url) <= 2048),
+        caption TEXT NOT NULL DEFAULT '' CHECK (length(caption) <= 200),
+        sort_order INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        thread_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        sender_role TEXT NOT NULL CHECK (sender_role IN ('guest', 'superadmin')),
+        body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
+        created_at TEXT NOT NULL,
+        read_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_user_id, created_at);
       CREATE INDEX IF NOT EXISTS reservations_active_dates ON reservations(status, start_date, end_date);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
       CREATE INDEX IF NOT EXISTS attempts_address_time ON login_attempts(address_hash, attempted_at);
     `);
+    const userColumns = new Set([...this.sql.exec("SELECT name FROM pragma_table_info('users')")].map((row) => row.name));
+    if (!userColumns.has("role")) {
+      this.sql.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+    }
+    const reservationColumns = new Set([...this.sql.exec("SELECT name FROM pragma_table_info('reservations')")].map((row) => row.name));
+    if (!reservationColumns.has("payment_status")) {
+      // Payments are intentionally unimplemented; this column is the seam a
+      // payment provider will attach to later.
+      this.sql.exec("ALTER TABLE reservations ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'not_required'");
+    }
+    if (this.superadminEmail) {
+      this.sql.exec("UPDATE users SET role = CASE WHEN email = ? THEN 'superadmin' ELSE 'member' END", this.superadminEmail);
+    }
+    this.sql.exec(`
+      INSERT INTO listing (id, name, tagline, description, updated_at)
+      VALUES (1, 'Gandy House', 'Come for the tide. Stay for the porch.', 'A weathered little house where the coffee is strong, the rules are few, and every sunset earns an audience.', ?)
+      ON CONFLICT (id) DO NOTHING
+    `, new Date().toISOString());
   }
 
   corsHeaders(request) {
@@ -135,7 +177,10 @@ export class BeachHouseProperty extends DurableObject {
       : {};
   }
 
-  json(request, status, value, extraHeaders = {}) {
+  async json(request, status, value, extraHeaders = {}) {
+    // Discard any unread request body; workerd raises "Can't read from request
+    // stream after response has been sent" if a body is left unconsumed.
+    if (request.body && !request.bodyUsed) await request.body.cancel().catch(() => {});
     return Response.json(value, {
       status,
       headers: {
@@ -161,7 +206,7 @@ export class BeachHouseProperty extends DurableObject {
     const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
     if (!token) return null;
     return firstRow(this.sql.exec(`
-      SELECT users.id, users.email, users.display_name
+      SELECT users.id, users.email, users.display_name, users.role
       FROM sessions JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?
     `, await sha256(token), new Date().toISOString()));
@@ -198,8 +243,8 @@ export class BeachHouseProperty extends DurableObject {
     return true;
   }
 
-  broadcastAvailability() {
-    const message = JSON.stringify({ type: "reservations", changed_at: new Date().toISOString() });
+  broadcast(type) {
+    const message = JSON.stringify({ type, changed_at: new Date().toISOString() });
     for (const socket of this.ctx.getWebSockets()) {
       try { socket.send(message); } catch {}
     }
@@ -233,7 +278,7 @@ export class BeachHouseProperty extends DurableObject {
         headers: {
           ...this.corsHeaders(request),
           "Access-Control-Allow-Headers": "authorization, content-type",
-          "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
           "Access-Control-Max-Age": "86400",
         },
       });
@@ -252,14 +297,16 @@ export class BeachHouseProperty extends DurableObject {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
         if (displayName.length < 2 || displayName.length > 60) throw new Error("Name must be between 2 and 60 characters.");
         if (password.length < 10 || password.length > 200) throw new Error("Password must be between 10 and 200 characters.");
-        const user = { id: crypto.randomUUID(), email, display_name: displayName };
+        const role = this.superadminEmail && email === this.superadminEmail ? "superadmin" : "member";
+        const user = { id: crypto.randomUUID(), email, display_name: displayName, role };
         try {
           this.sql.exec(
-            "INSERT INTO users (id, email, display_name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (id, email, display_name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             user.id,
             email,
             displayName,
             await hashPassword(password),
+            role,
             new Date().toISOString(),
           );
         } catch (error) {
@@ -275,13 +322,13 @@ export class BeachHouseProperty extends DurableObject {
         const email = String(body.email ?? "").trim().toLowerCase();
         const password = String(body.password ?? "");
         const userRecord = firstRow(this.sql.exec(
-          "SELECT id, email, display_name, password_hash FROM users WHERE email = ?",
+          "SELECT id, email, display_name, role, password_hash FROM users WHERE email = ?",
           email,
         ));
         if (!userRecord || !(await passwordMatches(password, userRecord.password_hash))) {
           return this.json(request, 401, { error: "Email or password is incorrect." });
         }
-        const user = { id: userRecord.id, email: userRecord.email, display_name: userRecord.display_name };
+        const user = { id: userRecord.id, email: userRecord.email, display_name: userRecord.display_name, role: userRecord.role };
         return this.json(request, 200, { user, ...await this.issueSession(user.id) });
       }
 
@@ -294,6 +341,10 @@ export class BeachHouseProperty extends DurableObject {
 
       const user = await this.userForRequest(request);
       if (!user) return this.json(request, 401, { error: "Your session has expired. Sign in again." });
+      const isAdmin = user.role === "superadmin";
+      if (url.pathname.startsWith("/admin/") && !isAdmin) {
+        return this.json(request, 403, { error: "Only the superadmin account can do that." });
+      }
 
       if (url.pathname === "/session" && request.method === "GET") {
         return this.json(request, 200, { user });
@@ -309,6 +360,149 @@ export class BeachHouseProperty extends DurableObject {
         );
         this.sql.exec("DELETE FROM socket_tickets WHERE expires_at <= ?", new Date().toISOString());
         return this.json(request, 201, { ticket });
+      }
+
+      if (url.pathname === "/listing" && request.method === "GET") {
+        const listing = firstRow(this.sql.exec("SELECT name, tagline, description, updated_at FROM listing WHERE id = 1"));
+        const photos = [...this.sql.exec("SELECT id, url, caption, sort_order, created_at FROM photos ORDER BY sort_order, created_at")];
+        return this.json(request, 200, { listing, photos });
+      }
+
+      if (url.pathname === "/admin/listing" && request.method === "PUT") {
+        const body = await this.readJson(request);
+        const name = String(body.name ?? "").trim();
+        const tagline = String(body.tagline ?? "").trim();
+        const description = String(body.description ?? "").trim();
+        if (name.length < 2 || name.length > 80) return this.json(request, 400, { error: "Listing name must be between 2 and 80 characters." });
+        if (tagline.length > 160) return this.json(request, 400, { error: "Tagline is limited to 160 characters." });
+        if (description.length > 2000) return this.json(request, 400, { error: "Description is limited to 2000 characters." });
+        this.sql.exec(
+          "UPDATE listing SET name = ?, tagline = ?, description = ?, updated_at = ? WHERE id = 1",
+          name, tagline, description, new Date().toISOString(),
+        );
+        this.broadcast("listing");
+        return this.json(request, 200, { listing: firstRow(this.sql.exec("SELECT name, tagline, description, updated_at FROM listing WHERE id = 1")) });
+      }
+
+      if (url.pathname === "/admin/photos" && request.method === "POST") {
+        const body = await this.readJson(request);
+        const photoUrl = String(body.url ?? "").trim();
+        const caption = String(body.caption ?? "").trim();
+        if (!/^https:\/\/.+/.test(photoUrl) || photoUrl.length > 2048) {
+          return this.json(request, 400, { error: "Photos need an https:// image URL (up to 2048 characters)." });
+        }
+        if (caption.length > 200) return this.json(request, 400, { error: "Captions are limited to 200 characters." });
+        const nextOrder = (firstRow(this.sql.exec("SELECT max(sort_order) AS top FROM photos"))?.top ?? 0) + 1;
+        const photo = { id: crypto.randomUUID(), url: photoUrl, caption, sort_order: nextOrder, created_at: new Date().toISOString() };
+        this.sql.exec(
+          "INSERT INTO photos (id, url, caption, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+          photo.id, photo.url, photo.caption, photo.sort_order, photo.created_at,
+        );
+        this.broadcast("listing");
+        return this.json(request, 201, { photo });
+      }
+
+      const photoDeletion = url.pathname.match(/^\/admin\/photos\/([a-f0-9-]+)$/);
+      if (photoDeletion && request.method === "DELETE") {
+        const result = this.sql.exec("DELETE FROM photos WHERE id = ? RETURNING id", photoDeletion[1]);
+        if (!firstRow(result)) return this.json(request, 404, { error: "That photo was not found." });
+        this.broadcast("listing");
+        return this.json(request, 200, { ok: true });
+      }
+
+      if (url.pathname === "/admin/reservations" && request.method === "GET") {
+        const reservations = [...this.sql.exec(`
+          SELECT reservations.id, reservations.user_id, reservations.guest_name, reservations.start_date,
+                 reservations.end_date, reservations.status, reservations.payment_status,
+                 reservations.created_at, users.email
+          FROM reservations JOIN users ON users.id = reservations.user_id
+          ORDER BY reservations.start_date DESC, reservations.created_at DESC
+        `)];
+        return this.json(request, 200, { reservations });
+      }
+
+      if (url.pathname === "/admin/users" && request.method === "GET") {
+        const users = [...this.sql.exec(`
+          SELECT users.id, users.email, users.display_name, users.role, users.created_at,
+                 count(reservations.id) AS confirmed_stays
+          FROM users LEFT JOIN reservations ON reservations.user_id = users.id AND reservations.status = 'confirmed'
+          GROUP BY users.id ORDER BY users.created_at
+        `)];
+        return this.json(request, 200, { users });
+      }
+
+      if (url.pathname === "/admin/payments" && request.method === "GET") {
+        // Deliberate stub: payments are out of scope for now. When a provider is
+        // wired in, this route plus reservations.payment_status are the hooks.
+        return this.json(request, 501, { error: "Payments are not set up yet." });
+      }
+
+      if (url.pathname === "/messages" && request.method === "GET") {
+        this.sql.exec(
+          "UPDATE messages SET read_at = ? WHERE thread_user_id = ? AND sender_role = 'superadmin' AND read_at IS NULL",
+          new Date().toISOString(), user.id,
+        );
+        const messages = [...this.sql.exec(
+          "SELECT id, sender_role, body, created_at, read_at FROM messages WHERE thread_user_id = ? ORDER BY created_at",
+          user.id,
+        )];
+        return this.json(request, 200, { messages });
+      }
+
+      if (url.pathname === "/messages" && request.method === "POST") {
+        if (isAdmin) return this.json(request, 400, { error: "Reply to guests from the admin inbox instead." });
+        const body = await this.readJson(request);
+        const text = String(body.body ?? "").trim();
+        if (!text || text.length > 2000) return this.json(request, 400, { error: "Messages must be between 1 and 2000 characters." });
+        const message = { id: crypto.randomUUID(), thread_user_id: user.id, sender_role: "guest", body: text, created_at: new Date().toISOString(), read_at: null };
+        this.sql.exec(
+          "INSERT INTO messages (id, thread_user_id, sender_role, body, created_at) VALUES (?, ?, 'guest', ?, ?)",
+          message.id, message.thread_user_id, message.body, message.created_at,
+        );
+        this.broadcast("messages");
+        return this.json(request, 201, { message });
+      }
+
+      if (url.pathname === "/admin/messages" && request.method === "GET") {
+        const threads = [...this.sql.exec(`
+          SELECT users.id AS user_id, users.display_name, users.email,
+            (SELECT body FROM messages WHERE thread_user_id = users.id ORDER BY created_at DESC LIMIT 1) AS last_message,
+            (SELECT created_at FROM messages WHERE thread_user_id = users.id ORDER BY created_at DESC LIMIT 1) AS last_message_at,
+            (SELECT count(*) FROM messages WHERE thread_user_id = users.id AND sender_role = 'guest' AND read_at IS NULL) AS unread_count
+          FROM users WHERE users.role != 'superadmin'
+          ORDER BY last_message_at IS NULL, last_message_at DESC, users.created_at
+        `)];
+        return this.json(request, 200, { threads });
+      }
+
+      const adminThread = url.pathname.match(/^\/admin\/messages\/([a-f0-9-]+)$/);
+      if (adminThread && request.method === "GET") {
+        const guest = firstRow(this.sql.exec("SELECT id, display_name, email FROM users WHERE id = ?", adminThread[1]));
+        if (!guest) return this.json(request, 404, { error: "That family member was not found." });
+        this.sql.exec(
+          "UPDATE messages SET read_at = ? WHERE thread_user_id = ? AND sender_role = 'guest' AND read_at IS NULL",
+          new Date().toISOString(), guest.id,
+        );
+        const messages = [...this.sql.exec(
+          "SELECT id, sender_role, body, created_at, read_at FROM messages WHERE thread_user_id = ? ORDER BY created_at",
+          guest.id,
+        )];
+        return this.json(request, 200, { guest, messages });
+      }
+
+      if (adminThread && request.method === "POST") {
+        const guest = firstRow(this.sql.exec("SELECT id FROM users WHERE id = ? AND role != 'superadmin'", adminThread[1]));
+        if (!guest) return this.json(request, 404, { error: "That family member was not found." });
+        const body = await this.readJson(request);
+        const text = String(body.body ?? "").trim();
+        if (!text || text.length > 2000) return this.json(request, 400, { error: "Messages must be between 1 and 2000 characters." });
+        const message = { id: crypto.randomUUID(), thread_user_id: guest.id, sender_role: "superadmin", body: text, created_at: new Date().toISOString(), read_at: null };
+        this.sql.exec(
+          "INSERT INTO messages (id, thread_user_id, sender_role, body, created_at) VALUES (?, ?, 'superadmin', ?, ?)",
+          message.id, message.thread_user_id, message.body, message.created_at,
+        );
+        this.broadcast("messages");
+        return this.json(request, 201, { message });
       }
 
       if (url.pathname === "/reservations" && request.method === "GET") {
@@ -353,19 +547,24 @@ export class BeachHouseProperty extends DurableObject {
           }
           throw error;
         }
-        this.broadcastAvailability();
+        this.broadcast("reservations");
         return this.json(request, 201, { reservation });
       }
 
       const cancellation = url.pathname.match(/^\/reservations\/([a-f0-9-]+)\/cancel$/);
       if (cancellation && request.method === "PATCH") {
-        const result = this.sql.exec(`
-          UPDATE reservations SET status = 'cancelled'
-          WHERE id = ? AND user_id = ? AND status = 'confirmed' AND start_date >= ?
-          RETURNING id
-        `, cancellation[1], user.id, todayIso());
+        const result = isAdmin
+          ? this.sql.exec(
+              "UPDATE reservations SET status = 'cancelled' WHERE id = ? AND status = 'confirmed' RETURNING id",
+              cancellation[1],
+            )
+          : this.sql.exec(`
+              UPDATE reservations SET status = 'cancelled'
+              WHERE id = ? AND user_id = ? AND status = 'confirmed' AND start_date >= ?
+              RETURNING id
+            `, cancellation[1], user.id, todayIso());
         if (!firstRow(result)) return this.json(request, 404, { error: "That future reservation was not found." });
-        this.broadcastAvailability();
+        this.broadcast("reservations");
         return this.json(request, 200, { ok: true });
       }
 
