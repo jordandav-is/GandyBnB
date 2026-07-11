@@ -93,8 +93,8 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid 
 .live-pill { display: flex; align-items: center; gap: .45rem; padding: .45rem .8rem; border: 1px solid rgba(30,106,120,.28); border-radius: 99px; background: var(--foam); color: #236271; font-size: .7rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .live-pill svg { width: 14px; fill: #48a185; color: #48a185; animation: pulse 2s infinite; }
 .user-menu { justify-self: end; display: flex; align-items: center; gap: .8rem; color: var(--muted); font-size: .82rem; font-weight: 700; }
-.user-menu button { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; }
-.user-menu button:hover { background: var(--sand); }
+.user-menu button:not(.admin-toggle) { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; transition: background .2s ease; }
+.user-menu button:not(.admin-toggle):hover { background: var(--sand); }
 .user-menu svg { width: 17px; }
 .hero { position: relative; min-height: 690px; display: flex; align-items: flex-end; overflow: hidden; padding: clamp(4rem, 9vw, 8.5rem) clamp(1.25rem, 8vw, 8rem); color: var(--paper); background:
   linear-gradient(120deg, rgba(9,37,54,.98) 0 38%, rgba(18,51,74,.85) 64%, rgba(30,106,120,.62)),
@@ -163,10 +163,11 @@ footer { min-height: 170px; display: grid; grid-template-columns: 1fr auto 1fr; 
 footer p { margin: 0; font-family: var(--font-display), serif; font-size: 1.1rem; text-align: center; }
 footer > span { justify-self: end; font-size: .67rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 
-.admin-toggle { display: flex; align-items: center; gap: .45rem; padding: .5rem .85rem; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--navy); cursor: pointer; font-size: .72rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
-.admin-toggle svg { width: 15px; }
-.admin-toggle:hover { background: var(--sand); }
+.admin-toggle { display: inline-flex; align-items: center; gap: .45rem; min-height: 40px; padding: 0 1.05rem; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--navy); cursor: pointer; font-size: .72rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; transition: background .2s ease, border-color .2s ease, color .2s ease; }
+.admin-toggle svg { width: 15px; min-width: 15px; }
+.admin-toggle:hover { border-color: var(--navy); background: var(--sand); }
 .admin-toggle.active { background: var(--navy); border-color: var(--navy); color: var(--paper); }
+.admin-toggle.active:hover { background: var(--navy-deep); border-color: var(--navy-deep); }
 
 .admin-shell { max-width: 1420px; margin: 0 auto; padding: clamp(2rem, 5vw, 4rem) clamp(1.25rem, 5vw, 5rem) clamp(4rem, 8vw, 7rem); }
 .admin-heading { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1.5rem; margin-bottom: 2rem; }
