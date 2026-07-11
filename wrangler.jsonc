@@ -15,7 +15,7 @@
     "bindings": [
       {
         "name": "BEACH_HOUSE",
-        "class_name": "BeachHouse"
+        "class_name": "BeachHouseProperty"
       }
     ]
   },
@@ -23,6 +23,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["BeachHouse"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["BeachHouseProperty"]
     }
   ]
 }

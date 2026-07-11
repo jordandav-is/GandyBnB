@@ -76,7 +76,10 @@ function firstRow(cursor) {
   return [...cursor][0] ?? null;
 }
 
-export class BeachHouse extends DurableObject {
+// Retained only because Cloudflare migration history requires every migrated class export.
+export class BeachHouse extends DurableObject {}
+
+export class BeachHouseProperty extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.ctx = ctx;
