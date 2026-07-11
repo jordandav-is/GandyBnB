@@ -69,7 +69,7 @@ function validateStay(start, end) {
   if (!startDate || !endDate) return "Choose valid check-in and check-out dates.";
   if (start < todayIso()) return "Check-in cannot be in the past.";
   if (end <= start) return "Check-out must be after check-in.";
-  if ((endDate.getTime() - startDate.getTime()) / DAY_IN_MS > 21) return "Family stays are limited to 21 nights.";
+  if ((endDate.getTime() - startDate.getTime()) / DAY_IN_MS > 21) return "Stays are limited to 21 nights.";
   return null;
 }
 
@@ -475,10 +475,64 @@ export class BeachHouseProperty extends DurableObject {
         return this.json(request, 200, { users });
       }
 
+      const userAction = url.pathname.match(/^\/admin\/users\/([a-f0-9-]+)$/);
+      if (userAction && request.method === "PATCH") {
+        const target = firstRow(this.sql.exec("SELECT id, email, role FROM users WHERE id = ?", userAction[1]));
+        if (!target) return this.json(request, 404, { error: "That guest was not found." });
+        const body = await this.readJson(request);
+        const displayName = String(body.display_name ?? "").trim();
+        const email = String(body.email ?? target.email).trim().toLowerCase();
+        if (displayName.length < 2 || displayName.length > 60) return this.json(request, 400, { error: "Name must be between 2 and 60 characters." });
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return this.json(request, 400, { error: "Enter a valid email address." });
+        // Roles are derived from SUPERADMIN_EMAIL at startup, so emails may not
+        // cross that boundary in either direction.
+        if (target.role === "superadmin" && email !== target.email) {
+          return this.json(request, 400, { error: "The superadmin email cannot be changed here." });
+        }
+        if (target.role !== "superadmin" && email === this.superadminEmail) {
+          return this.json(request, 400, { error: "That email is reserved for the superadmin account." });
+        }
+        try {
+          this.ctx.storage.transactionSync(() => {
+            this.sql.exec("UPDATE users SET display_name = ?, email = ? WHERE id = ?", displayName, email, target.id);
+            this.sql.exec("UPDATE reservations SET guest_name = ? WHERE user_id = ?", displayName, target.id);
+          });
+        } catch (error) {
+          if (String(error).includes("UNIQUE")) return this.json(request, 409, { error: "An account already exists for that email." });
+          throw error;
+        }
+        this.broadcast("reservations");
+        return this.json(request, 200, {
+          user: firstRow(this.sql.exec("SELECT id, email, display_name, role, created_at FROM users WHERE id = ?", target.id)),
+        });
+      }
+
+      if (userAction && request.method === "DELETE") {
+        const target = firstRow(this.sql.exec("SELECT id, role FROM users WHERE id = ?", userAction[1]));
+        if (!target) return this.json(request, 404, { error: "That guest was not found." });
+        if (target.role === "superadmin") return this.json(request, 400, { error: "The superadmin account cannot be deleted." });
+        this.ctx.storage.transactionSync(() => {
+          this.sql.exec("DELETE FROM sessions WHERE user_id = ?", target.id);
+          this.sql.exec("DELETE FROM socket_tickets WHERE user_id = ?", target.id);
+          this.sql.exec("DELETE FROM password_resets WHERE user_id = ?", target.id);
+          this.sql.exec("DELETE FROM messages WHERE thread_user_id = ?", target.id);
+          this.sql.exec("DELETE FROM reservations WHERE user_id = ?", target.id);
+          this.sql.exec("DELETE FROM users WHERE id = ?", target.id);
+        });
+        for (const socket of this.ctx.getWebSockets()) {
+          try {
+            if (socket.deserializeAttachment()?.user_id === target.id) socket.close(1000, "Account removed");
+          } catch {}
+        }
+        this.broadcast("reservations");
+        this.broadcast("messages");
+        return this.json(request, 200, { ok: true });
+      }
+
       const resetIssue = url.pathname.match(/^\/admin\/users\/([a-f0-9-]+)\/reset-code$/);
       if (resetIssue && request.method === "POST") {
         const target = firstRow(this.sql.exec("SELECT id, email FROM users WHERE id = ?", resetIssue[1]));
-        if (!target) return this.json(request, 404, { error: "That family member was not found." });
+        if (!target) return this.json(request, 404, { error: "That guest was not found." });
         const code = randomToken(5);
         const expiresAt = new Date(Date.now() + RESET_CODE_LIFETIME_MS).toISOString();
         this.sql.exec("DELETE FROM password_resets WHERE user_id = ?", target.id);
@@ -543,7 +597,7 @@ export class BeachHouseProperty extends DurableObject {
       const adminThread = url.pathname.match(/^\/admin\/messages\/([a-f0-9-]+)$/);
       if (adminThread && request.method === "GET") {
         const guest = firstRow(this.sql.exec("SELECT id, display_name, email FROM users WHERE id = ?", adminThread[1]));
-        if (!guest) return this.json(request, 404, { error: "That family member was not found." });
+        if (!guest) return this.json(request, 404, { error: "That guest was not found." });
         this.sql.exec(
           "UPDATE messages SET read_at = ? WHERE thread_user_id = ? AND sender_role = 'guest' AND read_at IS NULL",
           new Date().toISOString(), guest.id,
@@ -557,7 +611,7 @@ export class BeachHouseProperty extends DurableObject {
 
       if (adminThread && request.method === "POST") {
         const guest = firstRow(this.sql.exec("SELECT id FROM users WHERE id = ? AND role != 'superadmin'", adminThread[1]));
-        if (!guest) return this.json(request, 404, { error: "That family member was not found." });
+        if (!guest) return this.json(request, 404, { error: "That guest was not found." });
         const body = await this.readJson(request);
         const text = String(body.body ?? "").trim();
         if (!text || text.length > 2000) return this.json(request, 400, { error: "Messages must be between 1 and 2000 characters." });

@@ -274,4 +274,59 @@ describe("Superadmin account controls", () => {
     assert.equal(reuse.response.status, 401, "codes should be single-use");
     guest = { ...guest, token: reset.body.token };
   });
+
+  it("lets the superadmin edit a guest and keeps reservations in sync", async () => {
+    const denied = await api(`/admin/users/${guest.user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Gale Gandy", email: "gale@example.com" }),
+    }, guest.token);
+    assert.equal(denied.response.status, 403);
+
+    const booking = await api("/reservations", {
+      method: "POST",
+      body: JSON.stringify({ start_date: "2032-05-01", end_date: "2032-05-04" }),
+    }, guest.token);
+    assert.equal(booking.response.status, 201);
+
+    const reserved = await api(`/admin/users/${guest.user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Gale Gandy", email: "jordan@jordandav.is" }),
+    }, admin.token);
+    assert.equal(reserved.response.status, 400, "guests cannot take the superadmin email");
+
+    const updated = await api(`/admin/users/${guest.user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Gale Gandy", email: "gale.gandy@example.com" }),
+    }, admin.token);
+    assert.equal(updated.response.status, 200, JSON.stringify(updated.body));
+    assert.equal(updated.body.user.display_name, "Gale Gandy");
+    assert.equal(updated.body.user.email, "gale.gandy@example.com");
+
+    const calendar = await api("/reservations", {}, guest.token);
+    const row = calendar.body.reservations.find((entry) => entry.id === booking.body.reservation.id);
+    assert.equal(row.guest_name, "Gale Gandy", "reservations should carry the new name");
+
+    const adminRename = await api(`/admin/users/${admin.user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: "Jordan Davis", email: "someone-else@example.com" }),
+    }, admin.token);
+    assert.equal(adminRename.response.status, 400, "the superadmin email is locked");
+  });
+
+  it("lets the superadmin delete a guest but never the superadmin account", async () => {
+    const protectedAccount = await api(`/admin/users/${admin.user.id}`, { method: "DELETE" }, admin.token);
+    assert.equal(protectedAccount.response.status, 400);
+
+    const removed = await api(`/admin/users/${guest.user.id}`, { method: "DELETE" }, admin.token);
+    assert.equal(removed.response.status, 200, JSON.stringify(removed.body));
+
+    const goneSession = await api("/session", {}, guest.token);
+    assert.equal(goneSession.response.status, 401, "deleted accounts lose their sessions");
+
+    const overview = await api("/admin/reservations", {}, admin.token);
+    assert.ok(!overview.body.reservations.some((entry) => entry.user_id === guest.user.id), "their reservations should be gone");
+
+    const again = await api(`/admin/users/${guest.user.id}`, { method: "DELETE" }, admin.token);
+    assert.equal(again.response.status, 404);
+  });
 });

@@ -24,6 +24,67 @@ import { datesOverlap, formatStayDate, nightsBetween, stayDay, todayIso, type Re
 
 type Notice = { tone: "success" | "error" | "info"; text: string } | null;
 
+// Pisces Drive, Santa Rosa Beach FL — Open-Meteo is free and needs no API key.
+const HOUSE_LATITUDE = 30.373;
+const HOUSE_LONGITUDE = -86.258;
+const WEATHER_URL = `https://api.open-meteo.com/v1/forecast?latitude=${HOUSE_LATITUDE}&longitude=${HOUSE_LONGITUDE}`
+  + "&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max&forecast_days=1"
+  + "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=America%2FChicago";
+
+const WEATHER_LABELS: [codes: number[], label: string][] = [
+  [[0], "Clear skies"],
+  [[1], "Mostly sunny"],
+  [[2], "Partly cloudy"],
+  [[3], "Overcast"],
+  [[45, 48], "Foggy"],
+  [[51, 53, 55, 56, 57], "Drizzle"],
+  [[61, 63, 66], "Rain"],
+  [[65, 67], "Heavy rain"],
+  [[71, 73, 75, 77, 85, 86], "Snow (!)"],
+  [[80, 81], "Passing showers"],
+  [[82], "Heavy showers"],
+  [[95, 96, 99], "Thunderstorms"],
+];
+
+type Weather = { temperature: number; high: number; wind: number; label: string };
+
+function useHouseWeather() {
+  const [weather, setWeather] = useState<Weather | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch(WEATHER_URL);
+        if (!response.ok) return;
+        const data = await response.json() as {
+          current?: { temperature_2m?: number; weather_code?: number; wind_speed_10m?: number };
+          daily?: { temperature_2m_max?: number[] };
+        };
+        const temperature = data.current?.temperature_2m;
+        if (cancelled || typeof temperature !== "number") return;
+        const code = data.current?.weather_code ?? -1;
+        setWeather({
+          temperature: Math.round(temperature),
+          high: Math.round(data.daily?.temperature_2m_max?.[0] ?? temperature),
+          wind: Math.round(data.current?.wind_speed_10m ?? 0),
+          label: WEATHER_LABELS.find(([codes]) => codes.includes(code))?.[1] ?? "Beach weather",
+        });
+      } catch {
+        // The hero card falls back to its house-mood copy without live weather.
+      }
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 30 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  return weather;
+}
+
 export default function BeachHouseApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -173,7 +234,7 @@ function AuthScreen({ notice, setNotice, setSession }: { notice: Notice; setNoti
             </button>
           )}
           <NoticeBanner notice={notice} />
-          <p className="privacy-note">{mode === "reset" ? "No code yet? Message or call Jordan — reset codes are handed out personally and expire after an hour." : "Private to invited family members. Please don’t reuse an important password."}</p>
+          <p className="privacy-note">{mode === "reset" ? "No code yet? Message or call Jordan — reset codes are handed out personally and expire after an hour." : "Private to invited family & friends. Please don’t reuse an important password."}</p>
         </div>
       </section>
     </main>
@@ -258,6 +319,7 @@ function BookingDashboard({
     }
   }
 
+  const weather = useHouseWeather();
   const houseName = listing?.name ?? "Gandy House";
   const [taglineLead, ...taglineRest] = (listing?.tagline ?? "Come for the tide. Stay for the porch.").split(/(?<=\.)\s+/);
 
@@ -290,7 +352,11 @@ function BookingDashboard({
           <p>{listing?.description ?? "A weathered little house where the coffee is strong, the rules are few, and every sunset earns an audience."}</p>
           <a href="#book" className="text-link">Find your week <ArrowRight /></a>
         </div>
-        <div className="hero-card"><span>Today at the house</span><strong>72°</strong><small>Salt air · Porch breeze · Barefoot</small></div>
+        <div className="hero-card">
+          <span>{weather ? "Now in Santa Rosa Beach" : "Today at the house"}</span>
+          <strong>{weather ? `${weather.temperature}°` : "· · ·"}</strong>
+          <small>{weather ? `${weather.label} · Wind ${weather.wind} mph · High ${weather.high}°` : "Salt air · Porch breeze · Barefoot"}</small>
+        </div>
         <div className="sun-disc" aria-hidden="true" />
       </section>
 
@@ -320,6 +386,7 @@ function BookingDashboard({
 
           <div className="calendar-card">
             <div className="calendar-title"><div><span className="eyebrow">The porch ledger</span><h3>Upcoming stays</h3></div><span>{upcoming.length} booked</span></div>
+            <AvailabilityCalendar reservations={reservations} />
             {loadingCalendar ? <p className="empty-state">Refreshing the tide chart…</p> : upcoming.length === 0 ? (
               <div className="empty-state"><Umbrella /><strong>Wide-open calendar.</strong><span>Be the first to put a week on the books.</span></div>
             ) : (
@@ -369,6 +436,54 @@ function BookingDashboard({
       </>
       )}
     </main>
+  );
+}
+
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function AvailabilityCalendar({ reservations }: { reservations: Reservation[] }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const today = todayIso();
+  const [todayYear, todayMonth] = today.split("-").map(Number);
+  const month = new Date(Date.UTC(todayYear, todayMonth - 1 + monthOffset, 1));
+  const monthLabel = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" }).format(month);
+  const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
+
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const iso = `${month.toISOString().slice(0, 8)}${String(index + 1).padStart(2, "0")}`;
+    const stay = reservations.find((reservation) =>
+      reservation.status === "confirmed" && reservation.start_date <= iso && iso < reservation.end_date);
+    return { iso, day: index + 1, stay };
+  });
+
+  return (
+    <div className="availability" aria-label="Availability calendar">
+      <div className="availability-head">
+        <strong>{monthLabel}</strong>
+        <div className="availability-nav">
+          <button aria-label="Previous month" disabled={monthOffset === 0} onClick={() => setMonthOffset((value) => value - 1)}>←</button>
+          <button aria-label="Next month" onClick={() => setMonthOffset((value) => value + 1)}>→</button>
+        </div>
+      </div>
+      <div className="cal-grid">
+        {WEEKDAY_LETTERS.map((letter, index) => <span key={index} className="dow" aria-hidden="true">{letter}</span>)}
+        {Array.from({ length: month.getUTCDay() }, (_, index) => <span key={`pad-${index}`} />)}
+        {days.map(({ iso, day, stay }) => (
+          <span
+            key={iso}
+            className={`cal-day ${stay ? "booked" : "open"} ${iso < today ? "past" : ""} ${iso === today ? "today" : ""}`}
+            title={stay ? `Booked · ${stay.guest_name}` : iso < today ? undefined : "Available"}
+          >
+            {day}
+          </span>
+        ))}
+      </div>
+      <div className="cal-legend">
+        <span><i className="open" /> Available</span>
+        <span><i className="booked" /> Booked</span>
+        <span><i className="today" /> Today</span>
+      </div>
+    </div>
   );
 }
 

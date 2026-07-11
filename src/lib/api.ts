@@ -14,7 +14,7 @@ export type MessageThread = {
   unread_count: number;
 };
 export type AdminReservation = Reservation & { email: string; payment_status: string };
-export type FamilyMember = { id: string; email: string; display_name: string; role: string; created_at: string; confirmed_stays: number };
+export type Guest = { id: string; email: string; display_name: string; role: string; created_at: string; confirmed_stays: number };
 export type LiveEvent = "reservations" | "listing" | "messages";
 
 const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
@@ -145,8 +145,16 @@ export const api = {
     },
 
     async users() {
-      const body = await request<{ users: FamilyMember[] }>("/admin/users", {}, true);
+      const body = await request<{ users: Guest[] }>("/admin/users", {}, true);
       return body.users;
+    },
+
+    async updateUser(userId: string, changes: { display_name: string; email: string }) {
+      return request<{ user: Guest }>(`/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(changes) }, true);
+    },
+
+    async deleteUser(userId: string) {
+      await request(`/admin/users/${userId}`, { method: "DELETE" }, true);
     },
 
     async updateListing(listing: Pick<Listing, "name" | "tagline" | "description">) {
