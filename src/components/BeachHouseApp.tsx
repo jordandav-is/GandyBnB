@@ -112,7 +112,7 @@ function LoadingScreen() {
 
 
 function AuthScreen({ notice, setNotice, setSession }: { notice: Notice; setNotice: (value: Notice) => void; setSession: (value: Session) => void }) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [working, setWorking] = useState(false);
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
@@ -123,10 +123,13 @@ function AuthScreen({ notice, setNotice, setSession }: { notice: Notice; setNoti
     const email = String(values.get("email") ?? "").trim();
     const password = String(values.get("password") ?? "");
     const displayName = String(values.get("displayName") ?? "").trim();
+    const resetCode = String(values.get("resetCode") ?? "").trim();
     try {
       const nextSession = mode === "signup"
         ? await api.signup(email, password, displayName)
-        : await api.login(email, password);
+        : mode === "reset"
+          ? await api.resetPassword(email, resetCode, password)
+          : await api.login(email, password);
       setSession(nextSession);
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Sign-in failed." });
@@ -149,22 +152,28 @@ function AuthScreen({ notice, setNotice, setSession }: { notice: Notice; setNoti
       <section className="auth-panel">
         <div className="auth-card">
           <span className="eyebrow">The family guestbook</span>
-          <h2>{mode === "login" ? "Welcome back, beachcomber." : "Pull up a porch chair."}</h2>
-          <p>{mode === "login" ? "Sign in to see who has the keys next." : "Create your account to reserve a stay."}</p>
+          <h2>{mode === "login" ? "Welcome back, beachcomber." : mode === "reset" ? "Lost the house key?" : "Pull up a porch chair."}</h2>
+          <p>{mode === "login" ? "Sign in to see who has the keys next." : mode === "reset" ? "Enter the one-time reset code from Jordan and pick a new password." : "Create your account to reserve a stay."}</p>
           <div className="segmented" aria-label="Authentication mode">
-            <button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Sign in</button>
-            <button className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Join the family</button>
+            <button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setNotice(null); }}>Sign in</button>
+            <button className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setNotice(null); }}>Join the family</button>
           </div>
           <form onSubmit={submitAuth}>
             {mode === "signup" && <label>Your name<input name="displayName" minLength={2} maxLength={60} required autoComplete="name" /></label>}
             <label>Email address<input name="email" type="email" required autoComplete="email" /></label>
-            <label>Password<input name="password" type="password" minLength={10} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
+            {mode === "reset" && <label>Reset code<input name="resetCode" required autoComplete="one-time-code" placeholder="XXXXX-XXXXX" /></label>}
+            <label>{mode === "reset" ? "New password" : "Password"}<input name="password" type="password" minLength={10} required autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>
             <button className="primary-button" disabled={working} type="submit">
-              {working ? "Just a sec…" : mode === "login" ? "Open the calendar" : "Create my account"}<ArrowRight />
+              {working ? "Just a sec…" : mode === "login" ? "Open the calendar" : mode === "reset" ? "Set new password" : "Create my account"}<ArrowRight />
             </button>
           </form>
+          {mode !== "signup" && (
+            <button className="forgot-link" onClick={() => { setMode(mode === "reset" ? "login" : "reset"); setNotice(null); }}>
+              {mode === "reset" ? "Back to sign in" : "Forgot your password?"}
+            </button>
+          )}
           <NoticeBanner notice={notice} />
-          <p className="privacy-note">Private to invited family members. Please don’t reuse an important password.</p>
+          <p className="privacy-note">{mode === "reset" ? "No code yet? Message or call Jordan — reset codes are handed out personally and expire after an hour." : "Private to invited family members. Please don’t reuse an important password."}</p>
         </div>
       </section>
     </main>

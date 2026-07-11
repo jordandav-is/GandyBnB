@@ -92,6 +92,15 @@ export const api = {
     return session;
   },
 
+  async resetPassword(email: string, code: string, password: string) {
+    const session = await request<Session>("/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ email, code, password }),
+    });
+    saveSession(session);
+    return session;
+  },
+
   async logout() {
     try {
       await request("/auth/logout", { method: "POST" }, true);
@@ -150,6 +159,10 @@ export const api = {
 
     async deletePhoto(photoId: string) {
       await request(`/admin/photos/${photoId}`, { method: "DELETE" }, true);
+    },
+
+    async issueResetCode(userId: string) {
+      return request<{ code: string; email: string; expires_at: string }>(`/admin/users/${userId}/reset-code`, { method: "POST" }, true);
     },
 
     async threads() {

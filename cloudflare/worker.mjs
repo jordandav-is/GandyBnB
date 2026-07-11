@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const SOCKET_TICKET_LIFETIME_MS = 60 * 1000;
+const RESET_CODE_LIFETIME_MS = 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 100_000;
 const DAY_IN_MS = 86_400_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -76,6 +77,10 @@ function firstRow(cursor) {
   return [...cursor][0] ?? null;
 }
 
+function normalizeResetCode(value) {
+  return String(value).replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 // Retained only because Cloudflare migration history requires every migrated class export.
 export class BeachHouse extends DurableObject {}
 
@@ -88,6 +93,9 @@ export class BeachHouseProperty extends DurableObject {
       .map((origin) => origin.trim().replace(/\/$/, ""))
       .filter(Boolean);
     this.superadminEmail = String(env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
+    // Optional break-glass secret (wrangler secret put RECOVERY_CODE) that can
+    // reset the superadmin password even when no one can issue a code.
+    this.recoveryCode = normalizeResetCode(env.RECOVERY_CODE ?? "");
     this.sql = ctx.storage.sql;
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -107,6 +115,12 @@ export class BeachHouseProperty extends DurableObject {
         ticket_hash TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         expires_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS password_resets (
+        code_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS login_attempts (
         address_hash TEXT NOT NULL,
@@ -332,6 +346,36 @@ export class BeachHouseProperty extends DurableObject {
         return this.json(request, 200, { user, ...await this.issueSession(user.id) });
       }
 
+      if (url.pathname === "/auth/reset" && request.method === "POST") {
+        if (!(await this.rateLimitLogin(request))) return this.json(request, 429, { error: "Too many attempts. Try again in a minute." });
+        const body = await this.readJson(request);
+        const email = String(body.email ?? "").trim().toLowerCase();
+        const code = normalizeResetCode(body.code ?? "");
+        const password = String(body.password ?? "");
+        if (password.length < 10 || password.length > 200) throw new Error("Password must be between 10 and 200 characters.");
+        const userRecord = firstRow(this.sql.exec(
+          "SELECT id, email, display_name, role FROM users WHERE email = ?",
+          email,
+        ));
+        const rejection = () => this.json(request, 401, { error: "That reset code is not valid. Ask for a fresh one." });
+        if (!userRecord || !code) return rejection();
+        this.sql.exec("DELETE FROM password_resets WHERE expires_at <= ?", new Date().toISOString());
+        const resetRow = firstRow(this.sql.exec(
+          "SELECT user_id FROM password_resets WHERE code_hash = ? AND user_id = ?",
+          await sha256(code),
+          userRecord.id,
+        ));
+        const recoveryMatch = Boolean(this.recoveryCode)
+          && userRecord.email === this.superadminEmail
+          && code === this.recoveryCode;
+        if (!resetRow && !recoveryMatch) return rejection();
+        this.sql.exec("UPDATE users SET password_hash = ? WHERE id = ?", await hashPassword(password), userRecord.id);
+        this.sql.exec("DELETE FROM password_resets WHERE user_id = ?", userRecord.id);
+        this.sql.exec("DELETE FROM sessions WHERE user_id = ?", userRecord.id);
+        const user = { id: userRecord.id, email: userRecord.email, display_name: userRecord.display_name, role: userRecord.role };
+        return this.json(request, 200, { user, ...await this.issueSession(user.id) });
+      }
+
       if (url.pathname === "/auth/logout" && request.method === "POST") {
         const authorization = request.headers.get("Authorization") ?? "";
         const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
@@ -429,6 +473,27 @@ export class BeachHouseProperty extends DurableObject {
           GROUP BY users.id ORDER BY users.created_at
         `)];
         return this.json(request, 200, { users });
+      }
+
+      const resetIssue = url.pathname.match(/^\/admin\/users\/([a-f0-9-]+)\/reset-code$/);
+      if (resetIssue && request.method === "POST") {
+        const target = firstRow(this.sql.exec("SELECT id, email FROM users WHERE id = ?", resetIssue[1]));
+        if (!target) return this.json(request, 404, { error: "That family member was not found." });
+        const code = randomToken(5);
+        const expiresAt = new Date(Date.now() + RESET_CODE_LIFETIME_MS).toISOString();
+        this.sql.exec("DELETE FROM password_resets WHERE user_id = ?", target.id);
+        this.sql.exec(
+          "INSERT INTO password_resets (code_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+          await sha256(code),
+          target.id,
+          expiresAt,
+          new Date().toISOString(),
+        );
+        return this.json(request, 201, {
+          code: `${code.slice(0, 5)}-${code.slice(5)}`.toUpperCase(),
+          email: target.email,
+          expires_at: expiresAt,
+        });
       }
 
       if (url.pathname === "/admin/payments" && request.method === "GET") {
