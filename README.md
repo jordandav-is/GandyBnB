@@ -54,3 +54,13 @@ npm run build
 5. Run `.github/workflows/deploy-pages.yml`; it builds the static frontend and deploys `out/`.
 
 `ALLOWED_ORIGINS` in `wrangler.jsonc` must contain the GitHub Pages origin, currently `https://jordandav-is.github.io`. The Worker stores passwords as salted PBKDF2 hashes, stores only hashed session tokens, uses one-time WebSocket tickets, and serializes booking conflict checks inside a Durable Object SQLite transaction.
+
+## Password resets
+
+There is no email service, so resets are personal: the superadmin (the `SUPERADMIN_EMAIL` account from `wrangler.jsonc`) issues a one-time code from the admin panel's family-member list and shares it privately. The member uses **Forgot your password?** on the sign-in screen with that code. Codes expire after an hour, are single-use, and a successful reset signs out every existing session for that account.
+
+If the superadmin is ever locked out, set a break-glass secret and use it as the reset code for the superadmin email:
+
+```bash
+npx wrangler secret put RECOVERY_CODE
+```

@@ -240,4 +240,38 @@ describe("Superadmin account controls", () => {
     const stub = await api("/admin/payments", {}, admin.token);
     assert.equal(stub.response.status, 501);
   });
+
+  it("resets a password with an admin-issued one-time code", async () => {
+    const denied = await api(`/admin/users/${guest.user.id}/reset-code`, { method: "POST" }, guest.token);
+    assert.equal(denied.response.status, 403);
+
+    const issued = await api(`/admin/users/${guest.user.id}/reset-code`, { method: "POST" }, admin.token);
+    assert.equal(issued.response.status, 201, JSON.stringify(issued.body));
+    assert.match(issued.body.code, /^[A-F0-9]{5}-[A-F0-9]{5}$/);
+
+    const wrongCode = await api("/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ email: "gale@example.com", code: "AAAAA-AAAAA", password: "brand-new-pass-456" }),
+    });
+    assert.equal(wrongCode.response.status, 401);
+
+    const reset = await api("/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ email: "gale@example.com", code: issued.body.code, password: "brand-new-pass-456" }),
+    });
+    assert.equal(reset.response.status, 200, JSON.stringify(reset.body));
+    assert.equal(reset.body.user.role, "member");
+
+    const oldSession = await api("/session", {}, guest.token);
+    assert.equal(oldSession.response.status, 401, "previous sessions should be revoked");
+    const newSession = await api("/session", {}, reset.body.token);
+    assert.equal(newSession.response.status, 200);
+
+    const reuse = await api("/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ email: "gale@example.com", code: issued.body.code, password: "yet-another-pass-789" }),
+    });
+    assert.equal(reuse.response.status, 401, "codes should be single-use");
+    guest = { ...guest, token: reset.body.token };
+  });
 });

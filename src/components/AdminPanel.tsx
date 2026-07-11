@@ -84,6 +84,18 @@ function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
 
   useEffect(() => { queueMicrotask(() => void load()); }, [load, refreshKey]);
 
+  async function issueResetCode(userId: string) {
+    try {
+      const { code, email, expires_at } = await api.admin.issueResetCode(userId);
+      setNotice({
+        tone: "success",
+        text: `One-time reset code for ${email}: ${code} — share it with them privately; it expires ${new Date(expires_at).toLocaleTimeString()} and replaces any earlier code.`,
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "The reset code could not be created.") });
+    }
+  }
+
   async function cancelReservation(id: string) {
     try {
       await api.cancel(id);
@@ -126,7 +138,7 @@ function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
         <h3>Family members</h3>
         {members.length === 0 ? <p className="admin-empty">Nobody has joined yet.</p> : (
           <table className="admin-table">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Confirmed stays</th></tr></thead>
+            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Confirmed stays</th><th aria-label="Actions" /></tr></thead>
             <tbody>
               {members.map((member) => (
                 <tr key={member.id}>
@@ -134,6 +146,7 @@ function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
                   <td>{member.email}</td>
                   <td><span className={`status-tag ${member.role === "superadmin" ? "confirmed" : "pending"}`}>{member.role}</span></td>
                   <td>{member.confirmed_stays}</td>
+                  <td><button className="cancel-button" onClick={() => void issueResetCode(member.id)}>Password reset code</button></td>
                 </tr>
               ))}
             </tbody>
