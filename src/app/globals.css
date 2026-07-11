@@ -285,19 +285,40 @@ footer > span { justify-self: end; font-size: .67rem; font-weight: 800; letter-s
 }
 
 @media (max-width: 620px) {
-  .site-header { height: 70px; grid-template-columns: 1fr auto; }
+  .site-header { height: 64px; grid-template-columns: 1fr auto; gap: .6rem; }
   .live-pill { display: none; }
+  .user-menu { gap: .5rem; }
   .user-menu > span { display: none; }
-  .hero { min-height: 630px; align-items: center; padding-top: 9rem; }
+  .user-menu button:not(.admin-toggle) { width: 36px; height: 36px; }
+  .brand-mark { gap: .5rem; font-size: 1.05rem; }
+  .brand-mark span { white-space: nowrap; }
+  .admin-toggle { min-height: 36px; padding: 0 .8rem; }
+  .hero { min-height: 630px; flex-direction: column; align-items: flex-start; justify-content: center; padding-top: 6.5rem; padding-bottom: 4.5rem; }
   .hero-copy h1 { font-size: clamp(3.6rem, 18vw, 5.8rem); }
-  .sun-disc { top: 8%; right: -7%; width: 150px; }
-  .hero-card { top: 1.2rem; right: 1rem; width: 165px; padding: 1rem; transform: scale(.72) rotate(3deg); }
+  .sun-disc { top: -60px; right: -55px; width: 150px; }
+  .hero-card { position: static; width: auto; max-width: 250px; margin-top: 2.2rem; padding: 1rem 1.3rem; transform: rotate(2deg); }
+  .hero-card strong { font-size: 2.8rem; }
   .section-heading { align-items: start; flex-direction: column; }
   .realtime-note { max-width: none; }
   .date-fields { grid-template-columns: 1fr; }
   .date-fields > svg { display: none; }
   .reservation-row { grid-template-columns: 50px 1fr; padding: 1rem; }
   .reservation-row .cancel-button, .reservation-row .booked-tag { grid-column: 2; justify-self: start; }
+  .cal-day { min-height: 40px; }
+  .admin-table { overflow-x: visible; }
+  .admin-table thead { display: none; }
+  .admin-table tbody, .admin-table tr, .admin-table td { display: block; width: 100%; }
+  .admin-table tr { padding: 1rem 0; border-bottom: 1px solid var(--line); }
+  .admin-table tr:last-child { border-bottom: 0; }
+  .admin-table td { padding: .3rem 0; border-bottom: 0; }
+  .admin-table td[data-label] { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; column-gap: 1rem; }
+  .admin-table td[data-label]::before { content: attr(data-label); grid-row: 1; grid-column: 1; align-self: start; padding-top: .15rem; color: var(--muted); font-size: .62rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+  .admin-table td[data-label] > * { grid-column: 2; justify-self: start; }
+  .admin-table td.row-actions, .admin-table td.guest-actions { display: flex; flex-wrap: wrap; gap: .5rem .75rem; padding-top: .55rem; white-space: normal; }
+  .admin-table td.row-actions:empty { display: none; }
+  .admin-table td.guest-actions .cancel-button { margin-right: 0; }
+  .admin-table td span.delete-warning { flex-basis: 100%; margin-right: 0; }
+  .guest-edit-form .guest-edit-actions { flex-basis: 100%; }
   .auth-story { min-height: 420px; }
   .story-copy h1 { font-size: 3.8rem; }
   .auth-panel { min-height: 620px; padding: 3rem 1.25rem; }
