@@ -15,7 +15,7 @@ import {
 import {
   api,
   type AdminReservation,
-  type FamilyMember,
+  type Guest,
   type Listing,
   type Message,
   type MessageThread,
@@ -69,14 +69,14 @@ function errorText(error: unknown, fallback: string) {
 
 function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice: (value: Notice) => void }) {
   const [reservations, setReservations] = useState<AdminReservation[]>([]);
-  const [members, setMembers] = useState<FamilyMember[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
   const today = todayIso();
 
   const load = useCallback(async () => {
     try {
-      const [allReservations, allMembers] = await Promise.all([api.admin.reservations(), api.admin.users()]);
+      const [allReservations, allGuests] = await Promise.all([api.admin.reservations(), api.admin.users()]);
       setReservations(allReservations);
-      setMembers(allMembers);
+      setGuests(allGuests);
     } catch (error) {
       setNotice({ tone: "error", text: errorText(error, "The bookings could not be loaded.") });
     }
@@ -135,25 +135,110 @@ function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
         )}
       </div>
       <div className="admin-card">
-        <h3>Family members</h3>
-        {members.length === 0 ? <p className="admin-empty">Nobody has joined yet.</p> : (
+        <h3>Guests</h3>
+        {guests.length === 0 ? <p className="admin-empty">Nobody has joined yet.</p> : (
           <table className="admin-table">
             <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Confirmed stays</th><th aria-label="Actions" /></tr></thead>
             <tbody>
-              {members.map((member) => (
-                <tr key={member.id}>
-                  <td><strong>{member.display_name}</strong></td>
-                  <td>{member.email}</td>
-                  <td><span className={`status-tag ${member.role === "superadmin" ? "confirmed" : "pending"}`}>{member.role}</span></td>
-                  <td>{member.confirmed_stays}</td>
-                  <td><button className="cancel-button" onClick={() => void issueResetCode(member.id)}>Password reset code</button></td>
-                </tr>
+              {guests.map((guest) => (
+                <GuestRow
+                  key={guest.id}
+                  guest={guest}
+                  onIssueResetCode={() => void issueResetCode(guest.id)}
+                  onChanged={load}
+                  setNotice={setNotice}
+                />
               ))}
             </tbody>
           </table>
         )}
       </div>
     </div>
+  );
+}
+
+function GuestRow({ guest, onIssueResetCode, onChanged, setNotice }: {
+  guest: Guest;
+  onIssueResetCode: () => void;
+  onChanged: () => Promise<void>;
+  setNotice: (value: Notice) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [working, setWorking] = useState(false);
+  const isSuperadmin = guest.role === "superadmin";
+
+  async function saveGuest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    setWorking(true);
+    try {
+      await api.admin.updateUser(guest.id, {
+        display_name: String(values.get("display_name") ?? "").trim(),
+        email: String(values.get("email") ?? "").trim(),
+      });
+      setEditing(false);
+      setNotice({ tone: "success", text: `${guest.display_name}'s details are updated.` });
+      await onChanged();
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "The guest could not be updated.") });
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function deleteGuest() {
+    setWorking(true);
+    try {
+      await api.admin.deleteUser(guest.id);
+      setNotice({ tone: "info", text: `${guest.display_name}'s account, stays, and messages are removed.` });
+      await onChanged();
+    } catch (error) {
+      setNotice({ tone: "error", text: errorText(error, "The guest could not be removed.") });
+      setConfirmingDelete(false);
+      setWorking(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <tr className="guest-editing">
+        <td colSpan={5}>
+          <form className="guest-edit-form" onSubmit={saveGuest}>
+            <label>Name<input name="display_name" defaultValue={guest.display_name} minLength={2} maxLength={60} required /></label>
+            <label>Email<input name="email" type="email" defaultValue={guest.email} readOnly={isSuperadmin} required /></label>
+            <div className="guest-edit-actions">
+              <button className="primary-button" disabled={working} type="submit">{working ? "Saving…" : "Save"}</button>
+              <button className="cancel-button" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <td><strong>{guest.display_name}</strong></td>
+      <td>{guest.email}</td>
+      <td><span className={`status-tag ${isSuperadmin ? "confirmed" : "pending"}`}>{isSuperadmin ? "superadmin" : "guest"}</span></td>
+      <td>{guest.confirmed_stays}</td>
+      <td className="guest-actions">
+        {confirmingDelete ? (
+          <>
+            <span className="delete-warning">Remove {guest.display_name} and all their stays?</span>
+            <button className="cancel-button danger" disabled={working} onClick={() => void deleteGuest()}>{working ? "Removing…" : "Yes, remove"}</button>
+            <button className="cancel-button" disabled={working} onClick={() => setConfirmingDelete(false)}>Keep</button>
+          </>
+        ) : (
+          <>
+            <button className="cancel-button" onClick={() => setEditing(true)}>Edit</button>
+            <button className="cancel-button" onClick={onIssueResetCode}>Password reset code</button>
+            {!isSuperadmin && <button className="cancel-button danger" onClick={() => setConfirmingDelete(true)}>Delete</button>}
+          </>
+        )}
+      </td>
+    </tr>
   );
 }
 
@@ -324,7 +409,7 @@ function MessagesTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
     <div className="admin-panel messages-layout">
       <div className="admin-card thread-list">
         <h3>Guests</h3>
-        {threads.length === 0 ? <p className="admin-empty">No family members to message yet.</p> : threads.map((thread) => (
+        {threads.length === 0 ? <p className="admin-empty">No guests to message yet.</p> : threads.map((thread) => (
           <button
             key={thread.user_id}
             className={`thread-row ${activeUserId === thread.user_id ? "active" : ""}`}

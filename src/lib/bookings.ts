@@ -41,7 +41,7 @@ export function validateStay(start: string, end: string, today = new Date()) {
   if (start < earliest) return "Check-in cannot be in the past.";
   if (end <= start) return "Check-out must be after check-in.";
   if ((endDate.getTime() - startDate.getTime()) / DAY_IN_MS > 21) {
-    return "Family stays are limited to 21 nights.";
+    return "Stays are limited to 21 nights.";
   }
   return null;
 }
