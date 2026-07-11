@@ -245,8 +245,9 @@ footer > span { justify-self: end; font-size: .67rem; font-weight: 800; letter-s
 .guest-messages .section-heading, .guest-messages .admin-card { max-width: 860px; margin-inline: auto; }
 .guest-messages .section-heading { margin-bottom: 2.5rem; }
 .messages-layout { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.6fr); align-items: start; }
+.messages-layout > .admin-card { min-width: 0; }
 .thread-list { display: grid; gap: .4rem; align-content: start; }
-.thread-row { display: grid; gap: .3rem; padding: .8rem .9rem; border: 1px solid transparent; border-radius: 3px; background: transparent; cursor: pointer; text-align: left; }
+.thread-row { min-width: 0; display: grid; gap: .3rem; padding: .8rem .9rem; border: 1px solid transparent; border-radius: 3px; background: transparent; cursor: pointer; text-align: left; }
 .thread-row:hover { background: var(--sand); }
 .thread-row.active { border-color: var(--line); background: var(--sand); }
 .thread-row strong { display: flex; align-items: center; gap: .5rem; color: var(--navy); }
@@ -257,7 +258,7 @@ footer > span { justify-self: end; font-size: .67rem; font-weight: 800; letter-s
 .chat-bubble.mine { justify-self: end; border-radius: 14px 3px 14px 14px; background: var(--navy); color: var(--paper); }
 .chat-bubble time { display: block; margin-top: .35rem; font-size: .64rem; opacity: .65; }
 .chat-compose { display: grid; grid-template-columns: 1fr auto; gap: .7rem; }
-.chat-compose input { min-height: 54px; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 3px; background: rgba(255,250,240,.75); color: var(--ink); }
+.chat-compose input { min-width: 0; min-height: 54px; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 3px; background: rgba(255,250,240,.75); color: var(--ink); }
 .chat-compose .primary-button { min-height: 54px; justify-content: center; padding: 0 1.2rem; }
 .payments-stub { display: grid; justify-items: start; gap: .8rem; }
 .payments-stub > svg { width: 42px; height: 42px; color: var(--coral); }
@@ -322,6 +323,14 @@ footer > span { justify-self: end; font-size: .67rem; font-weight: 800; letter-s
   .auth-story { min-height: 420px; }
   .story-copy h1 { font-size: 3.8rem; }
   .auth-panel { min-height: 620px; padding: 3rem 1.25rem; }
+}
+
+@media (max-width: 400px) {
+  .site-header { padding: 0 1rem; }
+  .brand-mark { font-size: .95rem; }
+  .brand-mark svg { width: 20px; }
+  .admin-toggle { padding: 0 .7rem; }
+  .admin-toggle svg { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
