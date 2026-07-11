@@ -118,12 +118,12 @@ function BookingsTab({ refreshKey, setNotice }: { refreshKey: number; setNotice:
             <tbody>
               {reservations.map((reservation) => (
                 <tr key={reservation.id} className={reservation.status === "cancelled" ? "is-cancelled" : ""}>
-                  <td><strong>{reservation.guest_name}</strong><span>{reservation.email}</span></td>
-                  <td>{formatStayDate(reservation.start_date)} → {formatStayDate(reservation.end_date)}</td>
-                  <td>{nightsBetween(reservation.start_date, reservation.end_date)}</td>
-                  <td><span className={`status-tag ${reservation.status}`}>{reservation.status === "confirmed" && reservation.end_date < today ? "past" : reservation.status}</span></td>
-                  <td><span className="status-tag pending">{reservation.payment_status.replace(/_/g, " ")}</span></td>
-                  <td>
+                  <td data-label="Guest"><strong>{reservation.guest_name}</strong><span>{reservation.email}</span></td>
+                  <td data-label="Dates">{formatStayDate(reservation.start_date)} → {formatStayDate(reservation.end_date)}</td>
+                  <td data-label="Nights">{nightsBetween(reservation.start_date, reservation.end_date)}</td>
+                  <td data-label="Status"><span className={`status-tag ${reservation.status}`}>{reservation.status === "confirmed" && reservation.end_date < today ? "past" : reservation.status}</span></td>
+                  <td data-label="Payment"><span className="status-tag pending">{reservation.payment_status.replace(/_/g, " ")}</span></td>
+                  <td className="row-actions">
                     {reservation.status === "confirmed" && (
                       <button className="cancel-button" onClick={() => void cancelReservation(reservation.id)}>Cancel</button>
                     )}
@@ -219,10 +219,10 @@ function GuestRow({ guest, onIssueResetCode, onChanged, setNotice }: {
 
   return (
     <tr>
-      <td><strong>{guest.display_name}</strong></td>
-      <td>{guest.email}</td>
-      <td><span className={`status-tag ${isSuperadmin ? "confirmed" : "pending"}`}>{isSuperadmin ? "superadmin" : "guest"}</span></td>
-      <td>{guest.confirmed_stays}</td>
+      <td data-label="Name"><strong>{guest.display_name}</strong></td>
+      <td data-label="Email">{guest.email}</td>
+      <td data-label="Role"><span className={`status-tag ${isSuperadmin ? "confirmed" : "pending"}`}>{isSuperadmin ? "superadmin" : "guest"}</span></td>
+      <td data-label="Stays">{guest.confirmed_stays}</td>
       <td className="guest-actions">
         {confirmingDelete ? (
           <>
