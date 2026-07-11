@@ -39,7 +39,7 @@ npm run build
 ## Deployment
 
 - `render.yaml` deploys the custom Node API with a persistent SQLite disk.
-- Add the deployed API origin to the API's `ALLOWED_ORIGINS`.
+- Add the deployed GitHub Pages frontend origin to the API's `ALLOWED_ORIGINS`.
 - Add the API URL as the GitHub repository secret `NEXT_PUBLIC_API_URL`.
 - `.github/workflows/deploy-pages.yml` builds the static frontend and deploys `out/` to GitHub Pages.
 
