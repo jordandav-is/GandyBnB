@@ -43,3 +43,21 @@ export function Waves(props: IconProps) {
 export function X(props: IconProps) {
   return <svg {...shared} {...props}><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
+export function Shield(props: IconProps) {
+  return <svg {...shared} {...props}><path d="M12 3 5 6v5c0 5 3 8.4 7 10 4-1.6 7-5 7-10V6l-7-3Z" /></svg>;
+}
+export function Camera(props: IconProps) {
+  return <svg {...shared} {...props}><path d="M4 8h3l2-3h6l2 3h3v12H4V8Z" /><circle cx="12" cy="13" r="3.5" /></svg>;
+}
+export function Trash(props: IconProps) {
+  return <svg {...shared} {...props}><path d="M4 7h16M9 7V4h6v3m-8.5 0 1 13h9l1-13M10 11v6m4-6v6" /></svg>;
+}
+export function Send(props: IconProps) {
+  return <svg {...shared} {...props}><path d="M21 3 3 10.5l7 3.5 3.5 7L21 3Zm-11 10.5L21 3" /></svg>;
+}
+export function MessageCircle(props: IconProps) {
+  return <svg {...shared} {...props}><path d="M12 4a8 8 0 0 1 0 16H4l1.8-3.6A8 8 0 0 1 12 4Z" /></svg>;
+}
+export function CreditCard(props: IconProps) {
+  return <svg {...shared} {...props}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h4" /></svg>;
+}

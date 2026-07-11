@@ -1,7 +1,21 @@
 import type { Reservation } from "./bookings";
 
-export type User = { id: string; email: string; display_name: string };
+export type User = { id: string; email: string; display_name: string; role: "member" | "superadmin" };
 export type Session = { user: User; token: string; expires_at: string };
+export type Listing = { name: string; tagline: string; description: string; updated_at: string };
+export type Photo = { id: string; url: string; caption: string; sort_order: number; created_at: string };
+export type Message = { id: string; sender_role: "guest" | "superadmin"; body: string; created_at: string; read_at: string | null };
+export type MessageThread = {
+  user_id: string;
+  display_name: string;
+  email: string;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+};
+export type AdminReservation = Reservation & { email: string; payment_status: string };
+export type FamilyMember = { id: string; email: string; display_name: string; role: string; created_at: string; confirmed_stays: number };
+export type LiveEvent = "reservations" | "listing" | "messages";
 
 const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const sessionStorageKey = "gandy-house-session";
@@ -102,7 +116,57 @@ export const api = {
     await request(`/reservations/${reservationId}/cancel`, { method: "PATCH" }, true);
   },
 
-  subscribe(onReservationChange: () => void) {
+  async listing() {
+    return request<{ listing: Listing; photos: Photo[] }>("/listing", {}, true);
+  },
+
+  async myMessages() {
+    const body = await request<{ messages: Message[] }>("/messages", {}, true);
+    return body.messages;
+  },
+
+  async sendMessage(text: string) {
+    return request<{ message: Message }>("/messages", { method: "POST", body: JSON.stringify({ body: text }) }, true);
+  },
+
+  admin: {
+    async reservations() {
+      const body = await request<{ reservations: AdminReservation[] }>("/admin/reservations", {}, true);
+      return body.reservations;
+    },
+
+    async users() {
+      const body = await request<{ users: FamilyMember[] }>("/admin/users", {}, true);
+      return body.users;
+    },
+
+    async updateListing(listing: Pick<Listing, "name" | "tagline" | "description">) {
+      return request<{ listing: Listing }>("/admin/listing", { method: "PUT", body: JSON.stringify(listing) }, true);
+    },
+
+    async addPhoto(url: string, caption: string) {
+      return request<{ photo: Photo }>("/admin/photos", { method: "POST", body: JSON.stringify({ url, caption }) }, true);
+    },
+
+    async deletePhoto(photoId: string) {
+      await request(`/admin/photos/${photoId}`, { method: "DELETE" }, true);
+    },
+
+    async threads() {
+      const body = await request<{ threads: MessageThread[] }>("/admin/messages", {}, true);
+      return body.threads;
+    },
+
+    async thread(userId: string) {
+      return request<{ guest: { id: string; display_name: string; email: string }; messages: Message[] }>(`/admin/messages/${userId}`, {}, true);
+    },
+
+    async reply(userId: string, text: string) {
+      return request<{ message: Message }>(`/admin/messages/${userId}`, { method: "POST", body: JSON.stringify({ body: text }) }, true);
+    },
+  },
+
+  subscribe(onLiveEvent: (event: LiveEvent) => void) {
     let stopped = false;
     let retryTimer: number | undefined;
     let socket: WebSocket | undefined;
@@ -117,7 +181,9 @@ export const api = {
         socket.addEventListener("message", (event) => {
           try {
             const message = JSON.parse(String(event.data)) as { type?: string };
-            if (message.type === "reservations") onReservationChange();
+            if (message.type === "reservations" || message.type === "listing" || message.type === "messages") {
+              onLiveEvent(message.type);
+            }
           } catch {
             // Ignore malformed messages and keep the live connection open.
           }

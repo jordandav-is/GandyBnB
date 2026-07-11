@@ -146,3 +146,98 @@ describe("Cloudflare Durable Object booking API", () => {
     socket.close();
   });
 });
+
+describe("Superadmin account controls", () => {
+  let admin;
+  let guest;
+
+  before(async () => {
+    admin = await signup("jordan@jordandav.is", "Jordan");
+    guest = await signup("gale@example.com", "Gale");
+  });
+
+  it("grants the superadmin role only to the configured email", () => {
+    assert.equal(admin.user.role, "superadmin");
+    assert.equal(guest.user.role, "member");
+  });
+
+  it("locks admin endpoints to the superadmin account", async () => {
+    const forbidden = await api("/admin/reservations", {}, guest.token);
+    assert.equal(forbidden.response.status, 403);
+    const allowed = await api("/admin/reservations", {}, admin.token);
+    assert.equal(allowed.response.status, 200);
+  });
+
+  it("lets the superadmin see and cancel any guest booking", async () => {
+    const booking = await api("/reservations", {
+      method: "POST",
+      body: JSON.stringify({ start_date: "2031-06-01", end_date: "2031-06-05" }),
+    }, guest.token);
+    assert.equal(booking.response.status, 201);
+
+    const overview = await api("/admin/reservations", {}, admin.token);
+    const row = overview.body.reservations.find((entry) => entry.id === booking.body.reservation.id);
+    assert.ok(row, "admin overview should include the guest booking");
+    assert.equal(row.email, "gale@example.com");
+    assert.equal(row.payment_status, "not_required");
+
+    const cancelled = await api(`/reservations/${booking.body.reservation.id}/cancel`, { method: "PATCH" }, admin.token);
+    assert.equal(cancelled.response.status, 200);
+    const calendar = await api("/reservations", {}, guest.token);
+    assert.ok(!calendar.body.reservations.some((entry) => entry.id === booking.body.reservation.id));
+  });
+
+  it("lets the superadmin update the listing and manage photos", async () => {
+    const rejected = await api("/admin/listing", {
+      method: "PUT",
+      body: JSON.stringify({ name: "Gandy House II", tagline: "Updated tagline.", description: "Fresh paint, same porch." }),
+    }, guest.token);
+    assert.equal(rejected.response.status, 403);
+
+    const updated = await api("/admin/listing", {
+      method: "PUT",
+      body: JSON.stringify({ name: "Gandy House II", tagline: "Updated tagline.", description: "Fresh paint, same porch." }),
+    }, admin.token);
+    assert.equal(updated.response.status, 200, JSON.stringify(updated.body));
+
+    const photo = await api("/admin/photos", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://example.com/porch.jpg", caption: "The porch" }),
+    }, admin.token);
+    assert.equal(photo.response.status, 201);
+
+    const seen = await api("/listing", {}, guest.token);
+    assert.equal(seen.body.listing.name, "Gandy House II");
+    assert.equal(seen.body.photos.length, 1);
+
+    const removed = await api(`/admin/photos/${photo.body.photo.id}`, { method: "DELETE" }, admin.token);
+    assert.equal(removed.response.status, 200);
+  });
+
+  it("carries messages between a guest and the superadmin inbox", async () => {
+    const sent = await api("/messages", {
+      method: "POST",
+      body: JSON.stringify({ body: "Is the outdoor shower working?" }),
+    }, guest.token);
+    assert.equal(sent.response.status, 201);
+
+    const inbox = await api("/admin/messages", {}, admin.token);
+    const thread = inbox.body.threads.find((entry) => entry.user_id === guest.user.id);
+    assert.ok(thread, "admin inbox should list the guest thread");
+    assert.equal(thread.unread_count, 1);
+
+    const reply = await api(`/admin/messages/${guest.user.id}`, {
+      method: "POST",
+      body: JSON.stringify({ body: "Yep — fixed it last weekend." }),
+    }, admin.token);
+    assert.equal(reply.response.status, 201);
+
+    const conversation = await api("/messages", {}, guest.token);
+    assert.deepEqual(conversation.body.messages.map((message) => message.sender_role), ["guest", "superadmin"]);
+  });
+
+  it("keeps payments unimplemented behind a stub", async () => {
+    const stub = await api("/admin/payments", {}, admin.token);
+    assert.equal(stub.response.status, 501);
+  });
+});

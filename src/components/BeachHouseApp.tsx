@@ -4,17 +4,22 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
+  Camera,
   Check,
   LogOut,
+  MessageCircle,
   Radio,
+  Send,
   Shell,
+  Shield,
   Sparkles,
   Umbrella,
   Users,
   Waves,
   X,
 } from "@/components/Icons";
-import { api, type Session } from "@/lib/api";
+import AdminPanel from "@/components/AdminPanel";
+import { api, type Listing, type Message, type Photo, type Session } from "@/lib/api";
 import { datesOverlap, formatStayDate, nightsBetween, stayDay, todayIso, type Reservation, validateStay } from "@/lib/bookings";
 
 type Notice = { tone: "success" | "error" | "info"; text: string } | null;
@@ -23,8 +28,12 @@ export default function BeachHouseApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const [liveTick, setLiveTick] = useState(0);
+  const [messagesTick, setMessagesTick] = useState(0);
 
   const loadReservations = useCallback(async () => {
     setLoadingCalendar(true);
@@ -37,6 +46,16 @@ export default function BeachHouseApp() {
     }
   }, []);
 
+  const loadListing = useCallback(async () => {
+    try {
+      const { listing: current, photos: gallery } = await api.listing();
+      setListing(current);
+      setPhotos(gallery);
+    } catch {
+      // The hero copy falls back to defaults if the listing cannot load.
+    }
+  }, []);
+
   useEffect(() => {
     api.restoreSession().then((restored) => {
       setSession(restored);
@@ -46,9 +65,17 @@ export default function BeachHouseApp() {
 
   useEffect(() => {
     if (!session) return;
-    queueMicrotask(() => void loadReservations());
-    return api.subscribe(() => void loadReservations());
-  }, [session, loadReservations]);
+    queueMicrotask(() => {
+      void loadReservations();
+      void loadListing();
+    });
+    return api.subscribe((event) => {
+      setLiveTick((tick) => tick + 1);
+      if (event === "reservations") void loadReservations();
+      if (event === "listing") void loadListing();
+      if (event === "messages") setMessagesTick((tick) => tick + 1);
+    });
+  }, [session, loadReservations, loadListing]);
 
   if (!authReady) return <LoadingScreen />;
   if (!session) return <AuthScreen notice={notice} setNotice={setNotice} setSession={setSession} />;
@@ -57,10 +84,14 @@ export default function BeachHouseApp() {
     <BookingDashboard
       session={session}
       reservations={reservations}
+      listing={listing}
+      photos={photos}
       loadingCalendar={loadingCalendar}
       notice={notice}
       setNotice={setNotice}
       refresh={loadReservations}
+      liveTick={liveTick}
+      messagesTick={messagesTick}
       onLogout={async () => {
         await api.logout();
         setSession(null);
@@ -143,21 +174,31 @@ function AuthScreen({ notice, setNotice, setSession }: { notice: Notice; setNoti
 function BookingDashboard({
   session,
   reservations,
+  listing,
+  photos,
   loadingCalendar,
   notice,
   setNotice,
   refresh,
+  liveTick,
+  messagesTick,
   onLogout,
 }: {
   session: Session;
   reservations: Reservation[];
+  listing: Listing | null;
+  photos: Photo[];
   loadingCalendar: boolean;
   notice: Notice;
   setNotice: (value: Notice) => void;
   refresh: () => Promise<void>;
+  liveTick: number;
+  messagesTick: number;
   onLogout: () => Promise<void>;
 }) {
   const today = todayIso();
+  const isAdmin = session.user.role === "superadmin";
+  const [adminView, setAdminView] = useState(false);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [booking, setBooking] = useState(false);
@@ -208,19 +249,36 @@ function BookingDashboard({
     }
   }
 
+  const houseName = listing?.name ?? "Gandy House";
+  const [taglineLead, ...taglineRest] = (listing?.tagline ?? "Come for the tide. Stay for the porch.").split(/(?<=\.)\s+/);
+
   return (
     <main className="dashboard-shell">
       <header className="site-header">
-        <a className="brand-mark dark" href="#top"><Shell /><span>Gandy House</span></a>
+        <a className="brand-mark dark" href="#top"><Shell /><span>{houseName}</span></a>
         <div className="live-pill"><Radio /> Live calendar</div>
-        <div className="user-menu"><span>Ahoy, {name}</span><button aria-label="Sign out" onClick={() => void onLogout()}><LogOut /></button></div>
+        <div className="user-menu">
+          <span>Ahoy, {name}</span>
+          {isAdmin && (
+            <button
+              className={`admin-toggle ${adminView ? "active" : ""}`}
+              aria-pressed={adminView}
+              onClick={() => setAdminView((value) => !value)}
+            >
+              <Shield /> {adminView ? "Guest view" : "Admin"}
+            </button>
+          )}
+          <button aria-label="Sign out" onClick={() => void onLogout()}><LogOut /></button>
+        </div>
       </header>
 
+      {isAdmin && adminView ? <AdminPanel refreshKey={liveTick} /> : (
+      <>
       <section className="hero" id="top">
         <div className="hero-copy">
           <span className="eyebrow light">Your family’s place at the edge of the world</span>
-          <h1>Come for the tide.<br /><em>Stay for the porch.</em></h1>
-          <p>A weathered little house where the coffee is strong, the rules are few, and every sunset earns an audience.</p>
+          <h1>{taglineLead}{taglineRest.length > 0 && <><br /><em>{taglineRest.join(" ")}</em></>}</h1>
+          <p>{listing?.description ?? "A weathered little house where the coffee is strong, the rules are few, and every sunset earns an audience."}</p>
           <a href="#book" className="text-link">Find your week <ArrowRight /></a>
         </div>
         <div className="hero-card"><span>Today at the house</span><strong>72°</strong><small>Salt air · Porch breeze · Barefoot</small></div>
@@ -273,14 +331,99 @@ function BookingDashboard({
         </div>
       </section>
 
+      {photos.length > 0 && (
+        <section className="gallery-section">
+          <div className="section-heading">
+            <div><span className="eyebrow"><Camera /> Around the house</span><h2>Postcards from the porch</h2></div>
+          </div>
+          <div className="photo-grid guest">
+            {photos.map((photo) => (
+              <figure key={photo.id}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={photo.url} alt={photo.caption || "House photo"} loading="lazy" />
+                {photo.caption && <figcaption><span>{photo.caption}</span></figcaption>}
+              </figure>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!isAdmin && <GuestMessages messagesTick={messagesTick} />}
+
       <section className="house-rules">
         <div><Sparkles /><span>House note № 1</span><strong>Leave some ice in the freezer.</strong></div>
         <div><Waves /><span>House note № 2</span><strong>Never miss a sunset on purpose.</strong></div>
         <div><Shell /><span>House note № 3</span><strong>Sand in the car is inevitable.</strong></div>
       </section>
 
-      <footer><div className="brand-mark dark"><Shell /><span>Gandy House</span></div><p>Made for the people we’d share the last porch chair with.</p><span>One house · One calendar · Zero double-bookings</span></footer>
+      <footer><div className="brand-mark dark"><Shell /><span>{houseName}</span></div><p>Made for the people we’d share the last porch chair with.</p><span>One house · One calendar · Zero double-bookings</span></footer>
+      </>
+      )}
     </main>
+  );
+}
+
+function GuestMessages({ messagesTick }: { messagesTick: number }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setMessages(await api.myMessages());
+      setFailure(null);
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Messages could not be loaded.");
+    }
+  }, []);
+
+  useEffect(() => { queueMicrotask(() => void load()); }, [load, messagesTick]);
+
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.trim()) return;
+    setSending(true);
+    try {
+      await api.sendMessage(draft.trim());
+      setDraft("");
+      await load();
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "The message could not be sent.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <section className="guest-messages">
+      <div className="section-heading">
+        <div><span className="eyebrow"><MessageCircle /> House line</span><h2>Message the host</h2></div>
+      </div>
+      <div className="admin-card">
+        <div className="chat-scroll">
+          {messages.length === 0 ? (
+            <p className="admin-empty">Questions about your stay? Drop a note and Jordan will get back to you.</p>
+          ) : messages.map((message) => (
+            <p key={message.id} className={`chat-bubble ${message.sender_role === "guest" ? "mine" : ""}`}>
+              {message.body}
+              <time>{new Date(message.created_at).toLocaleString()}</time>
+            </p>
+          ))}
+        </div>
+        <form className="chat-compose" onSubmit={send}>
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Ask about the house, the keys, the tides…"
+            maxLength={2000}
+            aria-label="Message the host"
+          />
+          <button className="primary-button coral" disabled={sending || !draft.trim()} type="submit" aria-label="Send message"><Send /></button>
+        </form>
+        {failure && <div className="notice error" role="status"><X />{failure}</div>}
+      </div>
+    </section>
   );
 }
 
