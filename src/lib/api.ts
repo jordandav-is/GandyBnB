@@ -103,40 +103,39 @@ export const api = {
   },
 
   subscribe(onReservationChange: () => void) {
-    const controller = new AbortController();
+    let stopped = false;
     let retryTimer: number | undefined;
+    let socket: WebSocket | undefined;
 
     async function connect() {
-      const session = storedSession();
-      if (!session || controller.signal.aborted) return;
+      if (stopped || !storedSession()) return;
       try {
-        const response = await fetch(`${apiUrl}/events`, {
-          headers: { authorization: `Bearer ${session.token}`, accept: "text/event-stream" },
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) throw new Error("Live calendar connection failed.");
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let pending = "";
-        while (!controller.signal.aborted) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          pending += decoder.decode(value, { stream: true });
-          const events = pending.split("\n\n");
-          pending = events.pop() ?? "";
-          for (const event of events) {
-            if (event.split("\n").some((line) => line === "event: reservations")) onReservationChange();
+        const { ticket } = await request<{ ticket: string }>("/socket-ticket", { method: "POST" }, true);
+        if (stopped) return;
+        const socketUrl = `${apiUrl.replace(/^http/, "ws")}/events?ticket=${encodeURIComponent(ticket)}`;
+        socket = new WebSocket(socketUrl);
+        socket.addEventListener("message", (event) => {
+          try {
+            const message = JSON.parse(String(event.data)) as { type?: string };
+            if (message.type === "reservations") onReservationChange();
+          } catch {
+            // Ignore malformed messages and keep the live connection open.
           }
-        }
+        });
+        socket.addEventListener("close", () => {
+          if (!stopped) retryTimer = window.setTimeout(() => void connect(), 2_000);
+        });
+        socket.addEventListener("error", () => socket?.close());
       } catch {
-        if (!controller.signal.aborted) retryTimer = window.setTimeout(() => void connect(), 2_000);
+        if (!stopped) retryTimer = window.setTimeout(() => void connect(), 2_000);
       }
     }
 
     void connect();
     return () => {
-      controller.abort();
-      if (retryTimer) clearTimeout(retryTimer);
+      stopped = true;
+      socket?.close(1000, "Calendar closed");
+      clearTimeout(retryTimer);
     };
   },
 };

@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gandy-house-api",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-07-11",
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:3000,https://jordandav-is.github.io"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BEACH_HOUSE",
+        "class_name": "BeachHouse"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BeachHouse"]
+    }
+  ]
+}

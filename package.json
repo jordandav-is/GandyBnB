@@ -8,8 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "api": "node --disable-warning=ExperimentalWarning server/server.mjs",
-    "test": "node --experimental-strip-types --test src/lib/bookings.test.ts server/server.test.mjs"
+    "api": "wrangler dev --port 8787",
+    "deploy:api": "wrangler deploy",
+    "test": "node --experimental-strip-types --test src/lib/bookings.test.ts cloudflare/worker.test.mjs"
   },
   "dependencies": {
     "next": "16.2.10",
@@ -24,6 +25,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.110.0"
   }
 }

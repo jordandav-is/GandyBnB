@@ -1,10 +1,10 @@
 # Gandy House
 
-A single-property family beach-house calendar with home-rolled authentication, atomic SQLite reservations, and live Server-Sent Events.
+A single-property family beach-house calendar with home-rolled authentication, atomic SQLite reservations, and live WebSocket updates on a Cloudflare Durable Object.
 
 ## Local development
 
-Requires Node.js 22 or newer because the API uses Node's built-in SQLite module.
+Requires Node.js 22 or newer. Wrangler runs the Cloudflare Worker and its SQLite-backed Durable Object locally.
 
 ```bash
 npm install
@@ -19,14 +19,13 @@ npm run dev
 
 The frontend runs at `http://localhost:3000`; the API defaults to `http://localhost:8787`.
 
-Configuration:
+The frontend reads one public build-time variable:
 
 ```text
 NEXT_PUBLIC_API_URL=http://localhost:8787
-PORT=8787
-DATA_FILE=./data/gandybnb.sqlite
-ALLOWED_ORIGINS=http://localhost:3000
 ```
+
+Worker development settings—including allowed browser origins—live in `wrangler.jsonc`.
 
 ## Verification
 
@@ -38,9 +37,20 @@ npm run build
 
 ## Deployment
 
-- `render.yaml` deploys the custom Node API with a persistent SQLite disk.
-- Add the deployed GitHub Pages frontend origin to the API's `ALLOWED_ORIGINS`.
-- Add the API URL as the GitHub repository secret `NEXT_PUBLIC_API_URL`.
-- `.github/workflows/deploy-pages.yml` builds the static frontend and deploys `out/` to GitHub Pages.
+1. Authenticate the Cloudflare CLI:
 
-The frontend and API must use HTTPS in production. Never place credentials or private keys in `NEXT_PUBLIC_*` variables.
+   ```bash
+   npx wrangler login
+   ```
+
+2. Deploy the Worker and its SQLite-backed Durable Object:
+
+   ```bash
+   npm run deploy:api
+   ```
+
+3. Copy the resulting `https://gandy-house-api.<account>.workers.dev` URL into the GitHub repository secret `NEXT_PUBLIC_API_URL`.
+4. In GitHub **Settings → Pages**, select **GitHub Actions** as the source.
+5. Run `.github/workflows/deploy-pages.yml`; it builds the static frontend and deploys `out/`.
+
+`ALLOWED_ORIGINS` in `wrangler.jsonc` must contain the GitHub Pages origin, currently `https://jordandav-is.github.io`. The Worker stores passwords as salted PBKDF2 hashes, stores only hashed session tokens, uses one-time WebSocket tickets, and serializes booking conflict checks inside a Durable Object SQLite transaction.
